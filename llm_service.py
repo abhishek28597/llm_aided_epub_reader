@@ -47,14 +47,11 @@ class GroqLLMService:
             original_error = str(e)
             
             # Log the original error for debugging (can be removed in production)
-            print(f"Groq API Error: {original_error}")
+            print(f"Groq API Error on {self.model}: {original_error}")
             
-            # Check for specific error types
+            # Check for errors that should NOT fall back (authentication, context length, service errors)
             if "authentication" in error_str or ("invalid" in error_str and "key" in error_str):
                 raise Exception("Invalid API key. Please check your Groq API key and try again.")
-            
-            if "rate limit" in error_str or "429" in str(e):
-                raise Exception("Rate limit exceeded. Please wait a moment and try again.")
             
             if "context length" in error_str or ("token" in error_str and ("limit" in error_str or "exceeded" in error_str)):
                 raise Exception("Content too long. The chapter content exceeds the model's token limit. Try using plain text format instead of llms.txt.")
@@ -63,7 +60,10 @@ class GroqLLMService:
             if "<!DOCTYPE html>" in str(e) or "<html" in error_str or ("500" in str(e) and "internal server error" in error_str):
                 raise Exception("API service temporarily unavailable. Please try again in a few moments.")
             
-            # Try fallback model on other errors
+            # For rate limit errors and other errors, try fallback model
+            # Log that we're falling back
+            print(f"Falling back to {self.fallback_model} due to error on {self.model}")
+            
             try:
                 return self.client.chat.completions.create(
                     messages=messages,
@@ -75,15 +75,16 @@ class GroqLLMService:
                 last_error = e2
                 # Re-check error types for fallback
                 error_str2 = str(e2).lower()
-                if "authentication" in error_str2 or "invalid" in error_str2 and "key" in error_str2:
+                if "authentication" in error_str2 or ("invalid" in error_str2 and "key" in error_str2):
                     raise Exception("Invalid API key. Please check your Groq API key and try again.")
-                if "rate limit" in error_str2 or "429" in str(e2):
-                    raise Exception("Rate limit exceeded. Please wait a moment and try again.")
-                if "context length" in error_str2 or "token" in error_str2 and ("limit" in error_str2 or "exceeded" in error_str2):
+                if "context length" in error_str2 or ("token" in error_str2 and ("limit" in error_str2 or "exceeded" in error_str2)):
                     raise Exception("Content too long. The chapter content exceeds the model's token limit. Try using plain text format instead of llms.txt.")
+                # If fallback also fails with rate limit, raise the error
+                if "rate limit" in error_str2 or "429" in str(e2):
+                    raise Exception("Rate limit exceeded on both models. Please wait a moment and try again.")
                 raise last_error
     
-    def chat_with_chapter(self, chapter_text: str, user_message: str, chapter_title: str = "") -> str:
+    def chat_with_chapter(self, chapter_text: str, user_message: str, chapter_title: str = "", selected_text: Optional[str] = None) -> str:
         """
         Chat about a specific chapter with context
         
@@ -91,6 +92,7 @@ class GroqLLMService:
             chapter_text: The plain text or llms.txt content of the chapter
             user_message: User's question or message
             chapter_title: Optional chapter title for context
+            selected_text: Optional selected text block that should be prioritized in the response
             
         Returns:
             LLM response string
@@ -111,8 +113,26 @@ class GroqLLMService:
         context = f"You are a helpful reading assistant. The user is reading a book chapter and has a question about it.\n\n"
         if chapter_title:
             context += f"Current Chapter: {chapter_title}\n\n"
-        context += f"Chapter Content:\n{chapter_text}\n\n"
-        context += "Answer the user's question based on the chapter content above. Be concise and helpful."
+        
+        # If selected_text is provided, use ONLY the selected text as context
+        if selected_text and selected_text.strip():
+            # Truncate selected text if too long
+            max_selected_length = 5000  # Limit selected text to avoid token issues
+            trimmed_selected = selected_text.strip()
+            if len(trimmed_selected) > max_selected_length:
+                trimmed_selected = trimmed_selected[:max_selected_length] + "\n\n[Selected text truncated...]"
+            
+            context += "The user has specifically selected the following text block/paragraph from the chapter. "
+            context += "The user's question is specifically about THIS selected text block. "
+            context += "When the user refers to 'this paragraph', 'this text', 'this section', or similar phrases, "
+            context += "they are referring to the selected text below. Answer their question based ONLY on this selected text:\n\n"
+            context += f"SELECTED TEXT BLOCK:\n{trimmed_selected}\n\n"
+            context += "Answer the user's question based solely on the selected text block above. "
+            context += "When they say 'this paragraph' or 'this text', they mean the selected text block. Be concise and helpful."
+        else:
+            # Use full chapter context when no selection is made
+            context += f"Chapter Content:\n{chapter_text}\n\n"
+            context += "Answer the user's question based on the chapter content above. Be concise and helpful."
         
         messages = [
             {"role": "system", "content": context},

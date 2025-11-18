@@ -107,6 +107,76 @@
         .chat-input-area button:disabled { background: #ccc; cursor: not-allowed; }
         .chat-loading { color: #6c757d; font-size: 12px; font-style: italic; }
 
+        /* Text Selection Feature */
+        .book-content ::selection { background: rgba(52, 152, 219, 0.2); }
+        .book-content ::-moz-selection { background: rgba(52, 152, 219, 0.2); }
+        
+        #selectionButton {
+            position: fixed;
+            display: none;
+            z-index: 999;
+            padding: 10px 16px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-family: -apple-system, sans-serif;
+            font-weight: 500;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transition: all 0.2s;
+        }
+        #selectionButton:hover { background: #2980b9; transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.2); }
+        #selectionButton:active { transform: translateY(0); }
+        
+        .selected-text-context {
+            background: #f8f9fa;
+            border-left: 3px solid #3498db;
+            padding: 12px;
+            margin-bottom: 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #495057;
+            font-family: -apple-system, sans-serif;
+            position: relative;
+        }
+        .selected-text-context .context-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        .selected-text-context .context-text {
+            font-style: italic;
+            color: #212529;
+        }
+        .selected-text-context .clear-context {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: none;
+            border: none;
+            color: #6c757d;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: all 0.2s;
+        }
+        .selected-text-context .clear-context:hover {
+            background: #e9ecef;
+            color: #495057;
+        }
+
     </style>
 </head>
 <body>
@@ -286,6 +356,12 @@
                     llmstxtContent.style.display = (selectedFormat === 'llmstxt') ? 'block' : 'none';
                 }
 
+                // Hide selection button when not in HTML view
+                const selectionButton = document.getElementById('selectionButton');
+                if (selectionButton && selectedFormat !== 'html') {
+                    selectionButton.style.display = 'none';
+                }
+
                 // Update URL without reloading page
                 const url = new URL(window.location);
                 url.searchParams.set('format', selectedFormat);
@@ -343,6 +419,143 @@
             });
         });
 
+        // Text Selection Feature
+        document.addEventListener('DOMContentLoaded', function() {
+            const htmlContent = document.getElementById('htmlContent');
+            const selectionButton = document.getElementById('selectionButton');
+            let selectedText = null;
+            let selectedTextContextDiv = null;
+
+            // Only enable selection in HTML view
+            if (htmlContent) {
+                // Track mouse up to detect selection
+                htmlContent.addEventListener('mouseup', function(e) {
+                    const selection = window.getSelection();
+                    const selectedTextStr = selection.toString().trim();
+                    
+                    // Check if selection is within htmlContent and not empty
+                    if (selectedTextStr && htmlContent.contains(selection.anchorNode)) {
+                        // Show button near selection
+                        const range = selection.getRangeAt(0);
+                        const rect = range.getBoundingClientRect();
+                        
+                        // Calculate button position (centered above selection)
+                        const buttonWidth = 160; // Approximate button width
+                        const buttonHeight = 40;
+                        const spacing = 10;
+                        
+                        let leftPos = rect.left + rect.width / 2 - buttonWidth / 2;
+                        // Keep button within viewport
+                        leftPos = Math.max(10, Math.min(leftPos, window.innerWidth - buttonWidth - 10));
+                        
+                        let topPos = rect.top - buttonHeight - spacing;
+                        // If not enough space above, show below selection
+                        if (topPos < 10) {
+                            topPos = rect.bottom + spacing;
+                        }
+                        
+                        selectionButton.style.display = 'block';
+                        selectionButton.style.left = leftPos + 'px';
+                        selectionButton.style.top = topPos + 'px';
+                        
+                        // Store selected text
+                        selectedText = selectedTextStr;
+                    } else {
+                        // Hide button if selection is cleared or outside htmlContent
+                        selectionButton.style.display = 'none';
+                    }
+                });
+
+                // Hide button when clicking elsewhere
+                document.addEventListener('mousedown', function(e) {
+                    if (!htmlContent.contains(e.target) && e.target !== selectionButton) {
+                        selectionButton.style.display = 'none';
+                    }
+                });
+
+                // Handle selection button click
+                selectionButton.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    if (selectedText) {
+                        // Open chat if closed
+                        const chatWindow = document.getElementById('chatWindow');
+                        const chatToggle = document.getElementById('chatToggle');
+                        if (!chatWindow.classList.contains('open')) {
+                            chatToggle.click();
+                        }
+                        
+                        // Add selected text context to chat
+                        addSelectedTextContext(selectedText);
+                        
+                        // Focus chat input
+                        const chatInput = document.getElementById('chatInput');
+                        if (chatInput) {
+                            chatInput.focus();
+                        }
+                        
+                        // Hide button
+                        selectionButton.style.display = 'none';
+                    }
+                });
+            }
+
+            // Function to add selected text context to chat
+            function addSelectedTextContext(text) {
+                const chatMessages = document.getElementById('chatMessages');
+                if (!chatMessages) return;
+
+                // Remove existing context if any
+                if (selectedTextContextDiv) {
+                    selectedTextContextDiv.remove();
+                }
+
+                // Create context div
+                selectedTextContextDiv = document.createElement('div');
+                selectedTextContextDiv.className = 'selected-text-context';
+                
+                const label = document.createElement('div');
+                label.className = 'context-label';
+                label.textContent = 'Selected Context';
+                
+                const textDiv = document.createElement('div');
+                textDiv.className = 'context-text';
+                // Truncate if too long for display
+                const displayText = text.length > 200 ? text.substring(0, 200) + '...' : text;
+                textDiv.textContent = displayText;
+                textDiv.title = text; // Full text on hover
+                
+                const clearBtn = document.createElement('button');
+                clearBtn.className = 'clear-context';
+                clearBtn.innerHTML = '×';
+                clearBtn.title = 'Remove selected context';
+                clearBtn.addEventListener('click', function() {
+                    selectedTextContextDiv.remove();
+                    selectedTextContextDiv = null;
+                    selectedText = null;
+                });
+                
+                selectedTextContextDiv.appendChild(label);
+                selectedTextContextDiv.appendChild(textDiv);
+                selectedTextContextDiv.appendChild(clearBtn);
+                
+                chatMessages.appendChild(selectedTextContextDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+
+            // Expose selectedText to chat widget
+            window.getSelectedText = function() {
+                return selectedText;
+            };
+
+            window.clearSelectedText = function() {
+                if (selectedTextContextDiv) {
+                    selectedTextContextDiv.remove();
+                    selectedTextContextDiv = null;
+                }
+                selectedText = null;
+            };
+        });
+
         // Chat Widget
         document.addEventListener('DOMContentLoaded', function() {
             const chatToggle = document.getElementById('chatToggle');
@@ -365,6 +578,7 @@
             function sendMessage() {
                 const message = chatInput.value.trim();
                 const apiKey = chatApiKey.value.trim();
+                const selectedText = window.getSelectedText ? window.getSelectedText() : null;
 
                 if (!message) return;
                 if (!apiKey) {
@@ -380,16 +594,24 @@
                 // Show loading
                 const loadingMsg = addMessage('assistant', 'Thinking...', true);
 
+                // Build request body
+                const requestBody = {
+                    api_key: apiKey,
+                    message: message
+                };
+                
+                // Add selected_text if available
+                if (selectedText) {
+                    requestBody.selected_text = selectedText;
+                }
+
                 // Make API call
                 fetch('/api/chat/{{ book_id }}/{{ chapter_index }}', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        api_key: apiKey,
-                        message: message
-                    })
+                    body: JSON.stringify(requestBody)
                 })
                 .then(response => {
                     // Check if response is JSON
@@ -411,6 +633,10 @@
                         addMessage('assistant', 'Error: ' + data.error);
                     } else {
                         addMessage('assistant', data.response);
+                        // Clear selected text context after successful response
+                        if (window.getSelectedText && window.getSelectedText() && window.clearSelectedText) {
+                            window.clearSelectedText();
+                        }
                     }
                     chatSendBtn.disabled = false;
                 })
@@ -454,6 +680,9 @@
             });
         });
     </script>
+
+    <!-- Selection Button -->
+    <button id="selectionButton">💬 Ask about this</button>
 
     <!-- Chat Widget -->
     <div id="chatWidget">

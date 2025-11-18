@@ -16,6 +16,7 @@ from llm_service import GroqLLMService
 class ChatRequest(BaseModel):
     api_key: str
     message: str
+    selected_text: Optional[str] = None
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -294,6 +295,7 @@ async def chat_with_chapter(book_id: str, chapter_index: int, request_data: Chat
 
     api_key = request_data.api_key.strip()
     user_message = request_data.message.strip()
+    selected_text = request_data.selected_text.strip() if request_data.selected_text else None
 
     if not api_key:
         raise HTTPException(status_code=400, detail="API key is required")
@@ -320,7 +322,8 @@ async def chat_with_chapter(book_id: str, chapter_index: int, request_data: Chat
         response = llm_service.chat_with_chapter(
             chapter_text=chapter_text,
             user_message=user_message,
-            chapter_title=chapter_title
+            chapter_title=chapter_title,
+            selected_text=selected_text
         )
         
         return JSONResponse({"response": response})
