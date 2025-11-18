@@ -1,10 +1,14 @@
-# reader 3
+# llm assisted epub reader
 
+## Older karpathy's version of epub reader
 ![reader3](reader3.png)
 
-A lightweight, self-hosted EPUB reader that lets you read through EPUB books one chapter at a time. This makes it very easy to copy paste the contents of a chapter to an LLM, to read along. Basically - get epub books (e.g. [Project Gutenberg](https://www.gutenberg.org/) has many), open them up in this reader, copy paste text around to your favorite LLM, and read together and along.
+## Updated epub reader with LLM assistant
+![llm_reader](llm_reader.png)
 
-This project was 90% vibe coded just to illustrate how one can very easily [read books together with LLMs](https://x.com/karpathy/status/1990577951671509438). I'm not going to support it in any way, it's provided here as is for other people's inspiration and I don't intend to improve it. Code is ephemeral now and libraries are over, ask your LLM to change it in whatever way you like.
+A lightweight, self-hosted LLM assisted EPUB reader that lets you read through EPUB books one chapter at a time. This makes it very easy to read a chatper and know that there is an LLM reading along side you that nows the chatper and can answer your queries rike a pair-reader. Basically - get epub books (e.g. [Project Gutenberg](https://www.gutenberg.org/) has many), open them up in this reader, copy paste text around to your favorite LLM, and read together and along.
+
+This project was forked from [Karpathy's reader3 repo](https://github.com/karpathy/reader3?tab=readme-ov-file) and modifications have been made on top of it to support LLM assisted reading
 
 ## Usage
 
@@ -22,6 +26,3 @@ uv run server.py
 
 And visit [localhost:8123](http://localhost:8123/) to see your current Library. You can easily add more books, or delete them from your library by deleting the folder. It's not supposed to be complicated or complex.
 
-## License
-
-MIT
