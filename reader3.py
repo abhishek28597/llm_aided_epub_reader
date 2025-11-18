@@ -28,6 +28,7 @@ class ChapterContent:
     content: str      # Cleaned HTML with rewritten image paths
     text: str         # Plain text for search/LLM context
     order: int        # Linear reading order
+    llmstxt: Optional[str] = None  # llms.txt format (structured markdown) - generated during processing if API key provided
 
 
 @dataclass
@@ -300,14 +301,19 @@ if __name__ == "__main__":
         sys.exit(1)
 
     epub_file = sys.argv[1]
-    assert os.path.exists(epub_file), "File not found."
+    if not os.path.exists(epub_file):
+        print(f"Error: File not found: {epub_file}")
+        sys.exit(1)
+    
     out_dir = os.path.splitext(epub_file)[0] + "_data"
 
     book_obj = process_epub(epub_file, out_dir)
     save_to_pickle(book_obj, out_dir)
+    
     print("\n--- Summary ---")
     print(f"Title: {book_obj.metadata.title}")
     print(f"Authors: {', '.join(book_obj.metadata.authors)}")
     print(f"Physical Files (Spine): {len(book_obj.spine)}")
     print(f"TOC Root Items: {len(book_obj.toc)}")
     print(f"Images extracted: {len(book_obj.images)}")
+    print("\nNote: llms.txt format can be generated on-demand from the reader interface.")

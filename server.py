@@ -62,6 +62,39 @@ def get_chapter_title_from_toc(book: Book, chapter_href: str) -> str:
     title = search_toc_recursive(book.toc)
     return title if title else None
 
+
+def get_llmstxt_path(book_id: str, chapter_index: int) -> str:
+    """Get the file path for storing llms.txt for a chapter."""
+    safe_book_id = os.path.basename(book_id)
+    llmstxt_dir = os.path.join(BOOKS_DIR, safe_book_id, "llmstxt")
+    os.makedirs(llmstxt_dir, exist_ok=True)
+    return os.path.join(llmstxt_dir, f"chapter_{chapter_index}.txt")
+
+
+def load_llmstxt(book_id: str, chapter_index: int) -> Optional[str]:
+    """Load llms.txt content from file if it exists."""
+    llmstxt_path = get_llmstxt_path(book_id, chapter_index)
+    if os.path.exists(llmstxt_path):
+        try:
+            with open(llmstxt_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except Exception as e:
+            print(f"Error loading llms.txt: {e}")
+            return None
+    return None
+
+
+def save_llmstxt(book_id: str, chapter_index: int, content: str) -> bool:
+    """Save llms.txt content to file."""
+    try:
+        llmstxt_path = get_llmstxt_path(book_id, chapter_index)
+        with open(llmstxt_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return True
+    except Exception as e:
+        print(f"Error saving llms.txt: {e}")
+        return False
+
 @app.get("/", response_class=HTMLResponse)
 async def library_view(request: Request):
     """Lists all available processed books."""
@@ -84,7 +117,7 @@ async def library_view(request: Request):
     return templates.TemplateResponse("library.html", {"request": request, "books": books})
 
 @app.get("/read/{book_id}", response_class=HTMLResponse)
-async def redirect_to_first_chapter(request: Request, book_id: str, format: str = Query("html", description="Display format: 'html' or 'text'")):
+async def redirect_to_first_chapter(request: Request, book_id: str, format: str = Query("html", description="Display format: 'html', 'text', or 'llmstxt'")):
     """Helper to just go to chapter 0."""
     return await read_chapter(request=request, book_id=book_id, chapter_index=0, format=format)
 
@@ -93,7 +126,7 @@ async def read_chapter(
     request: Request, 
     book_id: str, 
     chapter_index: int,
-    format: str = Query("html", description="Display format: 'html' or 'text'")
+    format: str = Query("html", description="Display format: 'html', 'text', or 'llmstxt'")
 ):
     """The main reader interface."""
     book = load_book_cached(book_id)
@@ -114,6 +147,10 @@ async def read_chapter(
     if not chapter_title_display:
         chapter_title_display = current_chapter.title
 
+    # Check if llms.txt exists for this chapter
+    llmstxt_content = load_llmstxt(book_id, chapter_index)
+    has_llmstxt = llmstxt_content is not None
+
     return templates.TemplateResponse("reader.html", {
         "request": request,
         "book": book,
@@ -123,7 +160,9 @@ async def read_chapter(
         "prev_idx": prev_idx,
         "next_idx": next_idx,
         "format": format,
-        "chapter_title_display": chapter_title_display
+        "chapter_title_display": chapter_title_display,
+        "has_llmstxt": has_llmstxt,
+        "llmstxt_content": llmstxt_content
     })
 
 @app.get("/api/read/{book_id}/{chapter_index}/text", response_class=PlainTextResponse)
@@ -141,6 +180,105 @@ async def get_chapter_text(book_id: str, chapter_index: int):
 
     current_chapter = book.spine[chapter_index]
     return PlainTextResponse(current_chapter.text)
+
+@app.get("/api/read/{book_id}/{chapter_index}/llmstxt", response_class=PlainTextResponse)
+async def get_chapter_llmstxt(book_id: str, chapter_index: int):
+    """
+    API endpoint to get llms.txt format of a chapter.
+    Returns just the llms.txt content without HTML wrapper.
+    """
+    book = load_book_cached(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    if chapter_index < 0 or chapter_index >= len(book.spine):
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    llmstxt_content = load_llmstxt(book_id, chapter_index)
+    if llmstxt_content is None:
+        raise HTTPException(
+            status_code=404, 
+            detail="llms.txt format not available for this chapter. Generate it using the 'Generate llms.txt' button."
+        )
+    
+    return PlainTextResponse(llmstxt_content)
+
+@app.get("/api/check-llmstxt/{book_id}/{chapter_index}")
+async def check_llmstxt(book_id: str, chapter_index: int):
+    """Check if llms.txt exists for a chapter."""
+    book = load_book_cached(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    if chapter_index < 0 or chapter_index >= len(book.spine):
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    has_llmstxt = load_llmstxt(book_id, chapter_index) is not None
+    return JSONResponse({"has_llmstxt": has_llmstxt})
+
+
+class GenerateLlmstxtRequest(BaseModel):
+    api_key: str
+
+
+@app.post("/api/generate-llmstxt/{book_id}/{chapter_index}")
+async def generate_llmstxt(book_id: str, chapter_index: int, request_data: GenerateLlmstxtRequest):
+    """
+    Generate llms.txt format for a chapter on-demand.
+    """
+    book = load_book_cached(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    if chapter_index < 0 or chapter_index >= len(book.spine):
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    api_key = request_data.api_key.strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API key is required")
+
+    current_chapter = book.spine[chapter_index]
+    
+    # Get chapter title
+    chapter_title = get_chapter_title_from_toc(book, current_chapter.href)
+    if not chapter_title:
+        chapter_title = current_chapter.title
+
+    try:
+        llm_service = GroqLLMService(api_key=api_key)
+        llmstxt_content = llm_service.generate_llmstxt_from_html(
+            html_content=current_chapter.content,
+            chapter_title=chapter_title
+        )
+        
+        if llmstxt_content is None:
+            return JSONResponse(
+                {"error": "Failed to generate llms.txt. Please check your API key and try again."},
+                status_code=500
+            )
+        
+        # Save to file
+        if save_llmstxt(book_id, chapter_index, llmstxt_content):
+            return JSONResponse({
+                "success": True,
+                "message": "llms.txt generated successfully"
+            })
+        else:
+            return JSONResponse(
+                {"error": "Failed to save llms.txt file."},
+                status_code=500
+            )
+            
+    except Exception as e:
+        error_msg = str(e)
+        if "<!DOCTYPE html>" in error_msg or "<html" in error_msg.lower():
+            error_msg = "API service temporarily unavailable. Please try again in a few moments."
+        elif len(error_msg) > 200:
+            error_msg = error_msg[:200] + "..."
+        return JSONResponse(
+            {"error": f"Error generating llms.txt: {error_msg}"},
+            status_code=500
+        )
 
 @app.post("/api/chat/{book_id}/{chapter_index}")
 async def chat_with_chapter(book_id: str, chapter_index: int, request_data: ChatRequest):
@@ -164,7 +302,13 @@ async def chat_with_chapter(book_id: str, chapter_index: int, request_data: Chat
         raise HTTPException(status_code=400, detail="Message is required")
 
     current_chapter = book.spine[chapter_index]
-    chapter_text = current_chapter.text
+    
+    # Prefer llms.txt if available, otherwise use plain text
+    llmstxt_content = load_llmstxt(book_id, chapter_index)
+    if llmstxt_content:
+        chapter_text = llmstxt_content
+    else:
+        chapter_text = current_chapter.text
     
     # Get actual chapter title from TOC, fallback to spine title
     chapter_title = get_chapter_title_from_toc(book, current_chapter.href)
@@ -179,28 +323,20 @@ async def chat_with_chapter(book_id: str, chapter_index: int, request_data: Chat
             chapter_title=chapter_title
         )
         
-        # Check if the response itself is an error message (starts with "Error:")
-        if response.startswith("Error:"):
-            # Extract the error message
-            error_msg = response.replace("Error:", "").strip()
-            # Check if it contains HTML
-            if "<!DOCTYPE html>" in error_msg or "<html" in error_msg.lower():
-                error_msg = "API service temporarily unavailable. Please try again in a few moments."
-            return JSONResponse(
-                {"error": error_msg},
-                status_code=500
-            )
-        
         return JSONResponse({"response": response})
     except Exception as e:
         error_msg = str(e)
-        # If error message is HTML (like Cloudflare error page), provide a cleaner message
+        # The error message from llm_service should already be user-friendly
+        # Just clean it up if it contains HTML
         if "<!DOCTYPE html>" in error_msg or "<html" in error_msg.lower():
             error_msg = "API service temporarily unavailable. Please try again in a few moments."
-        elif len(error_msg) > 200:
-            error_msg = error_msg[:200] + "..."
+        elif len(error_msg) > 300:
+            # Truncate very long error messages but keep them informative
+            error_msg = error_msg[:300] + "..."
+        
+        # Return the error message directly (it's already formatted by llm_service)
         return JSONResponse(
-            {"error": f"Error calling LLM: {error_msg}"},
+            {"error": error_msg},
             status_code=500
         )
 
